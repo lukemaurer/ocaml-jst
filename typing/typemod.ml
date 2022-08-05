@@ -496,7 +496,7 @@ let merge_constraint initial_env remove_aliases loc sg constr =
             type_attributes = [];
             type_immediate = Unknown;
             type_unboxed = unboxed_false_default_false;
-            type_uid = Uid.mk ~current_unit:(Env.get_unit_name ());
+            type_uid = Uid.mk ~current_unit:(Compilation_unit.get_current_exn ());
           }
         and id_row = Ident.create_local (s^"#row") in
         let initial_env =
@@ -1161,7 +1161,7 @@ and transl_modtype_aux env smty =
                   { md_type = arg.mty_type;
                     md_attributes = [];
                     md_loc = param.loc;
-                    md_uid = Uid.mk ~current_unit:(Env.get_unit_name ());
+                    md_uid = Uid.mk ~current_unit:(Compilation_unit.get_current_exn ());
                   }
                 in
                 Env.enter_module_declaration ~scope ~arg:true name Mp_present
@@ -1302,7 +1302,7 @@ and transl_signature env sg =
               md_type=tmty.mty_type;
               md_attributes=pmd.pmd_attributes;
               md_loc=pmd.pmd_loc;
-              md_uid = Uid.mk ~current_unit:(Env.get_unit_name ());
+              md_uid = Uid.mk ~current_unit:(Compilation_unit.get_current_exn ());
             }
             in
             let id, newenv =
@@ -1339,7 +1339,7 @@ and transl_signature env sg =
                 { md_type = Mty_alias path;
                   md_attributes = pms.pms_attributes;
                   md_loc = pms.pms_loc;
-                  md_uid = Uid.mk ~current_unit:(Env.get_unit_name ());
+                  md_uid = Uid.mk ~current_unit:(Compilation_unit.get_current_exn ());
                 }
             in
             let pres =
@@ -1511,7 +1511,7 @@ and transl_modtype_decl_aux names env
      Types.mtd_type=Option.map (fun t -> t.mty_type) tmty;
      mtd_attributes=pmtd_attributes;
      mtd_loc=pmtd_loc;
-     mtd_uid = Uid.mk ~current_unit:(Env.get_unit_name ());
+     mtd_uid = Uid.mk ~current_unit:(Compilation_unit.get_current_exn ());
     }
   in
   let scope = Ctype.create_scope () in
@@ -1572,7 +1572,7 @@ and transl_recmodule_modtypes env sdecls =
            { md_type = approx_modtype approx_env pmd.pmd_type;
              md_loc = pmd.pmd_loc;
              md_attributes = pmd.pmd_attributes;
-             md_uid = Uid.mk ~current_unit:(Env.get_unit_name ()) }
+             md_uid = Uid.mk ~current_unit:(Compilation_unit.get_current_exn ()) }
          in
         (id, pmd.pmd_name, md, ()))
       ids sdecls
@@ -1897,9 +1897,14 @@ and type_module_aux ~alias sttn funct_body anchor env smod =
                  mod_attributes = smod.pmod_attributes;
                  mod_loc = smod.pmod_loc } in
       let aliasable = not (Env.is_functor_arg path env) in
-      if alias && aliasable then
-        (Env.add_required_global (Path.head path); md)
-      else begin
+      if alias && aliasable then begin
+        let address = Env.find_value_address path env in
+        begin match Env.address_head address with
+        | AHunit cu -> Env.add_required_global cu
+        | AHlocal _ -> ()
+        end;
+        md
+      end else begin
         let mty =
           if sttn then
             Env.find_strengthened_module ~aliasable path env
@@ -1948,7 +1953,7 @@ and type_module_aux ~alias sttn funct_body anchor env smod =
                 { md_type = mty.mty_type;
                   md_attributes = [];
                   md_loc = param.loc;
-                  md_uid = Uid.mk ~current_unit:(Env.get_unit_name ());
+                  md_uid = Uid.mk ~current_unit:(Compilation_unit.get_current_exn ());
                 }
               in
               let id, newenv =
@@ -2244,7 +2249,7 @@ and type_structure ?(toplevel = false) funct_body anchor env sstr =
           | Mty_alias _ -> Mp_absent
           | _ -> Mp_present
         in
-        let md_uid = Uid.mk ~current_unit:(Env.get_unit_name ()) in
+        let md_uid = Uid.mk ~current_unit:(Compilation_unit.get_current_exn ()) in
         let md =
           { md_type = enrich_module_type anchor name.txt modl.mod_type env;
             md_attributes = attrs;
@@ -2662,8 +2667,9 @@ let gen_annot outputprefix sourcefile annots =
   Cmt2annot.gen_annot (Some (outputprefix ^ ".annot"))
     ~sourcefile:(Some sourcefile) ~use_summaries:false annots
 
-let type_implementation sourcefile outputprefix modulename initial_env ast =
+let type_implementation sourcefile outputprefix comp_unit initial_env ast =
   Cmt_format.clear ();
+  let modulename = Compilation_unit.name_as_string comp_unit in
   Misc.try_finally (fun () ->
       Typecore.reset_delayed_checks ();
       Typecore.reset_allocations ();
@@ -2725,7 +2731,7 @@ let type_implementation sourcefile outputprefix modulename initial_env ast =
             let alerts = Builtin_attributes.alerts_of_str ast in
             let cmi =
               Env.save_signature ~alerts
-                simple_sg modulename (outputprefix ^ ".cmi")
+                simple_sg comp_unit (outputprefix ^ ".cmi")
             in
             let annots = Cmt_format.Implementation str in
             Cmt_format.save_cmt  (outputprefix ^ ".cmt") modulename
@@ -2780,13 +2786,14 @@ let package_signatures units =
         { md_type=Mty_signature sg;
           md_attributes=[];
           md_loc=Location.none;
-          md_uid = Uid.mk ~current_unit:(Env.get_unit_name ());
+          md_uid = Uid.mk ~current_unit:(Compilation_unit.get_current_exn ());
         }
       in
       Sig_module(newid, Mp_present, md, Trec_not, Exported))
     units_with_ids
 
-let package_units initial_env objfiles cmifile modulename =
+let package_units initial_env objfiles cmifile comp_unit =
+  let modulename = Compilation_unit.name_as_string comp_unit in
   (* Read the signatures of the units *)
   let units =
     List.map
@@ -2827,7 +2834,7 @@ let package_units initial_env objfiles cmifile modulename =
     if not !Clflags.dont_write_files then begin
       let cmi =
         Env.save_signature_with_imports ~alerts:Misc.Stdlib.String.Map.empty
-          sg modulename
+          sg comp_unit
           (prefix ^ ".cmi") imports
       in
       Cmt_format.save_cmt (prefix ^ ".cmt")  modulename

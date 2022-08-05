@@ -195,9 +195,15 @@ let build_global_target ~ppf_dump oc target_name members mapping pos coercion =
         | PM_intf -> None
         | PM_impl _ -> Some id2)
       members mapping in
-  let lam =
-    Translmod.transl_package
-      components (Ident.create_persistent target_name) coercion in
+  let compilation_unit =
+    (* CR lmaurer: Feels gross to be doing this here. *)
+    let for_pack_prefix =
+      Compilation_unit.Prefix.parse_for_pack !Clflags.for_package
+    in
+    Compilation_unit.create ~for_pack_prefix
+      (target_name |> Compilation_unit.Name.of_string)
+  in
+  let lam = Translmod.transl_package components compilation_unit coercion in
   let lam = Simplif.simplify_lambda lam in
   if !Clflags.dump_lambda then
     Format.fprintf ppf_dump "%a@." Printlambda.lambda lam;

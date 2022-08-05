@@ -387,10 +387,13 @@ let comp_bint_primitive bi suff args =
                 | Pint64 -> "caml_int64_" in
   Kccall(pref ^ suff, List.length args)
 
+let ident_of_compilation_unit cu =
+  cu |> Symbol.for_compilation_unit |> Symbol.linkage_name |> Ident.create_persistent
+
 let comp_primitive p args =
   match p with
-    Pgetglobal id -> Kgetglobal id
-  | Psetglobal id -> Ksetglobal id
+    Pgetglobal cu -> Kgetglobal (cu |> ident_of_compilation_unit)
+  | Psetglobal cu -> Ksetglobal (cu |> ident_of_compilation_unit)
   | Pintcomp cmp -> Kintcomp cmp
   | Pcompare_ints -> Kccall("caml_int_compare", 2)
   | Pcompare_floats -> Kccall("caml_float_compare", 2)

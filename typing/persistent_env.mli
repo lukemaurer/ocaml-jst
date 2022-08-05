@@ -25,6 +25,7 @@ type error =
   | Inconsistent_import of modname * filepath * filepath
   | Need_recursive_types of modname
   | Depend_on_unsafe_string_unit of modname
+  | Inconsistent_package_declaration of modname * filepath
 
 exception Error of error
 
@@ -81,7 +82,7 @@ val is_imported_opaque : 'a t -> modname -> bool
    opaque module *)
 val register_import_as_opaque : 'a t -> modname -> unit
 
-val make_cmi : 'a t -> modname -> Types.signature -> alerts
+val make_cmi : 'a t -> Compilation_unit.t -> Types.signature -> alerts
   -> Cmi_format.cmi_infos
 
 val save_cmi : 'a t -> Persistent_signature.t -> 'a -> unit
@@ -99,7 +100,8 @@ val import_crcs : 'a t -> source:filepath -> crcs -> unit
 val imports : 'a t -> crcs
 
 (* Return the CRC of the interface of the given compilation unit *)
-val crc_of_unit: 'a t -> (Persistent_signature.t -> 'a) -> modname -> Digest.t
+val crc_of_unit: 'a t -> (Persistent_signature.t -> 'a) -> modname
+  -> Digest.t
 
 (* Forward declaration to break mutual recursion with Typecore. *)
 val add_delayed_check_forward: ((unit -> unit) -> unit) ref

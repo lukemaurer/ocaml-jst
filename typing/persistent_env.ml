@@ -28,6 +28,7 @@ type error =
   | Inconsistent_import of modname * filepath * filepath
   | Need_recursive_types of modname
   | Depend_on_unsafe_string_unit of modname
+  | Inconsistent_package_declaration of modname * filepath
 
 exception Error of error
 let error err = raise (Error err)
@@ -48,8 +49,8 @@ type can_load_cmis =
   | Cannot_load_cmis of EnvLazy.log
 
 type pers_struct = {
-  ps_name: string;
-  ps_crcs: (string * Digest.t option) list;
+  ps_name: Compilation_unit.t;
+  ps_crcs: crcs;
   ps_filename: string;
   ps_flags: pers_flags list;
 }
@@ -157,7 +158,7 @@ let fold {persistent_structures; _} f x =
 
 let save_pers_struct penv crc ps pm =
   let {persistent_structures; crc_units; _} = penv in
-  let modname = ps.ps_name in
+  let modname = Compilation_unit.name_as_string ps.ps_name in
   Hashtbl.add persistent_structures modname (Found (ps, pm));
   List.iter
     (function
@@ -179,16 +180,17 @@ let acknowledge_pers_struct penv check modname pers_sig pm =
              ps_filename = filename;
              ps_flags = flags;
            } in
-  if ps.ps_name <> modname then
-    error (Illegal_renaming(modname, ps.ps_name, filename));
+  let basename = Compilation_unit.name_as_string ps.ps_name in
+  if not (String.equal basename modname) then
+    error (Illegal_renaming(modname, basename, filename));
   List.iter
     (function
         | Rectypes ->
             if not !Clflags.recursive_types then
-              error (Need_recursive_types(ps.ps_name))
+              error (Need_recursive_types(basename))
         | Unsafe_string ->
             if Config.safe_string then
-              error (Depend_on_unsafe_string_unit(ps.ps_name));
+              error (Depend_on_unsafe_string_unit(basename));
         | Alerts _ -> ()
         | Opaque -> register_import_as_opaque penv modname)
     ps.ps_flags;
@@ -255,6 +257,7 @@ let check_pers_struct penv f ~loc name =
         | Depend_on_unsafe_string_unit name ->
             Printf.sprintf "%s uses -unsafe-string"
               name
+        | Inconsistent_package_declaration _ -> assert false
       in
       let warn = Warnings.No_cmi_file(name, Some msg) in
         Location.prerr_warning loc warn
@@ -301,7 +304,7 @@ let is_imported {imported_units; _} s =
 let is_imported_opaque {imported_opaque_units; _} s =
   String.Set.mem s !imported_opaque_units
 
-let make_cmi penv modname sign alerts =
+let make_cmi penv comp_unit sign alerts =
   let flags =
     List.concat [
       if !Clflags.recursive_types then [Cmi_format.Rectypes] else [];
@@ -312,7 +315,7 @@ let make_cmi penv modname sign alerts =
   in
   let crcs = imports penv in
   {
-    cmi_name = modname;
+    cmi_name = comp_unit;
     cmi_sign = sign;
     cmi_crcs = crcs;
     cmi_flags = flags
@@ -320,9 +323,10 @@ let make_cmi penv modname sign alerts =
 
 let save_cmi penv psig pm =
   let { Persistent_signature.filename; cmi } = psig in
+  let modname = Compilation_unit.name_as_string cmi.cmi_name in
   Misc.try_finally (fun () ->
       let {
-        cmi_name = modname;
+        cmi_name = comp_unit;
         cmi_sign = _;
         cmi_crcs = imports;
         cmi_flags = flags;
@@ -334,8 +338,8 @@ let save_cmi penv psig pm =
       (* Enter signature in persistent table so that imports()
          will also return its crc *)
       let ps =
-        { ps_name = modname;
-          ps_crcs = (cmi.cmi_name, Some crc) :: imports;
+        { ps_name = comp_unit;
+          ps_crcs = (modname, Some crc) :: imports;
           ps_filename = filename;
           ps_flags = flags;
         } in
@@ -363,6 +367,11 @@ let report_error ppf =
         "@[<hov>Invalid import of %s, compiled with -unsafe-string.@ %s@]"
         import "This compiler has been configured in strict \
                                   safe-string mode (-force-safe-string)"
+  | Inconsistent_package_declaration(intf_package, intf_filename) ->
+      fprintf ppf
+        "@[<hov>The interface %s@ is compiled for package %s.@ %s]"
+        intf_package intf_filename
+         "The compilation flag -for-pack with the same package is required"
 
 let () =
   Location.register_error_of_exn

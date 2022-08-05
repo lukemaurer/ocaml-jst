@@ -103,6 +103,10 @@ val predef_exn : t
 (** The name of the compilation unit, excluding any [for_pack_prefix]. *)
 val name : t -> Name.t
 
+(** The name of the compilation unit, excluding any [for_pack_prefix], as
+    as a string. *)
+val name_as_string : t -> string
+
 (** The "-for-pack" prefix associated with the given compilation unit. *)
 val for_pack_prefix : t -> Prefix.t
 
@@ -129,5 +133,7 @@ type error = private
 exception Error of error
 
 val set_current : t -> unit
+val clear_current : unit -> unit
+val get_current : unit -> t option
 val get_current_exn : unit -> t
 val is_current : t -> bool

@@ -24,3 +24,6 @@ val reset: unit -> unit
 
 val merge_events:
   Instruct.debug_event -> Instruct.debug_event -> Instruct.debug_event
+
+(* CR lmaurer: There's probably a better place for this. *)
+val ident_of_compilation_unit : Compilation_unit.t -> Ident.t

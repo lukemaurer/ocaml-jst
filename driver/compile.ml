@@ -33,7 +33,7 @@ let interface ~source_file ~output_prefix =
 let to_bytecode i (typedtree, coercion) =
   (typedtree, coercion)
   |> Profile.(record transl)
-    (Translmod.transl_implementation i.module_name)
+    (Translmod.transl_implementation i.compilation_unit)
   |> Profile.(record ~accumulate:true generate)
     (fun { Lambda.code = lambda; required_globals } ->
        lambda
@@ -48,6 +48,11 @@ let to_bytecode i (typedtree, coercion) =
 let emit_bytecode i (bytecode, required_globals) =
   let cmofile = cmo i in
   let oc = open_out_bin cmofile in
+  let required_globals =
+    Compilation_unit.Set.elements required_globals
+    |> List.map Bytegen.ident_of_compilation_unit
+    |> Ident.Set.of_list
+  in
   Misc.try_finally
     ~always:(fun () -> close_out oc)
     ~exceptionally:(fun () -> Misc.remove_file cmofile)

@@ -166,6 +166,8 @@ let predef_exn = create (Name.of_string "*predef*")
 
 let name t = t.name
 
+let name_as_string t = name t |> Name.to_string
+
 let for_pack_prefix t = t.for_pack_prefix
 
 let with_for_pack_prefix t for_pack_prefix = { t with for_pack_prefix; }
@@ -232,6 +234,12 @@ let current = ref None
 
 let set_current t =
   current := Some t
+
+let clear_current () =
+  current := None
+
+let get_current () =
+  !current
 
 let get_current_exn () =
   match !current with
