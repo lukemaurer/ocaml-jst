@@ -2,10 +2,11 @@
 (*                                                                        *)
 (*                                 OCaml                                  *)
 (*                                                                        *)
-(*             Xavier Leroy, projet Gallium, INRIA Rocquencourt           *)
+(*                       Pierre Chambart, OCamlPro                        *)
+(*           Mark Shinwell and Leo White, Jane Street Europe              *)
 (*                                                                        *)
-(*   Copyright 2010 Institut National de Recherche en Informatique et     *)
-(*     en Automatique                                                     *)
+(*   Copyright 2013--2016 OCamlPro SAS                                    *)
+(*   Copyright 2014--2016 Jane Street Group LLC                           *)
 (*                                                                        *)
 (*   All rights reserved.  This file is distributed under the terms of    *)
 (*   the GNU Lesser General Public License version 2.1, with the          *)
@@ -13,23 +14,17 @@
 (*                                                                        *)
 (**************************************************************************)
 
-(* Format of .cmxs files *)
+[@@@ocaml.warning "+a-4-9-30-40-41-42-66"]
+open! Int_replace_polymorphic_compare
 
-open Misc
+type t = string
 
-(* Each .cmxs dynamically-loaded plugin contains a symbol
-   "caml_plugin_header" containing the following info
-   (as an externed record) *)
+include Identifiable.Make (struct
+  include String
+  let hash = Hashtbl.hash
+  let print ppf t = Format.pp_print_string ppf t
+  let output chan t = output_string chan t
+end)
 
-type dynunit = {
-  dynu_name: Compilation_unit.Name.t;
-  dynu_crc: Digest.t;
-  dynu_imports_cmi: crcs;
-  dynu_imports_cmx: crcs;
-  dynu_defines: Compilation_unit.t list;
-}
-
-type dynheader = {
-  dynu_magic: string;
-  dynu_units: dynunit list;
-}
+let of_string t = t
+let to_string t = t
