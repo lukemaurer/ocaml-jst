@@ -80,23 +80,15 @@ let clambda i backend Typedtree.{structure; coercion; _} =
             ~ppf_dump:i.ppf_dump;
        Compilenv.save_unit_info (cmx i))
 
-let reset_compilenv ~module_name =
-  let for_pack_prefix = Compilation_unit.Prefix.from_clflags () in
-  let comp_unit =
-    Compilation_unit.create for_pack_prefix
-      (Compilation_unit.Name.of_string module_name)
-  in
-  Compilenv.reset comp_unit
-
 (* Emit assembly directly from Linear IR *)
 let emit i =
-  reset_compilenv ~module_name:i.module_name;
+  Compilenv.reset i.module_name;
   Asmgen.compile_implementation_linear i.output_prefix ~progname:i.source_file
 
 let implementation ~backend ~start_from ~source_file
     ~output_prefix ~keep_symbol_tables:_ =
   let backend info typed =
-    reset_compilenv ~module_name:info.module_name;
+    Compilenv.reset info.module_name;
     if Config.flambda
     then flambda info backend typed
     else clambda info backend typed

@@ -25,11 +25,16 @@ open Topcommon
 
 let implementation_label = "native toplevel"
 
-let global_symbol id =
-  let sym = Compilenv.symbol_for_global id |> Linkage_name.to_string in
+let global_symbol comp_unit =
+  let sym =
+    Symbol.for_compilation_unit comp_unit
+    |> Symbol.linkage_name
+    |> Linkage_name.to_string
+  in
   match Tophooks.lookup sym with
   | None ->
-    fatal_error ("Toploop.global_symbol " ^ (Ident.unique_name id))
+    fatal_error ("Toploop.global_symbol " ^
+      (Compilation_unit.full_path_as_string comp_unit))
   | Some obj -> obj
 
 let remembered = ref Ident.empty
@@ -70,11 +75,13 @@ let toplevel_value id =
 
 module EvalBase = struct
 
+  let eval_compilation_unit cu =
+    try global_symbol cu
+    with _ ->
+      raise (Undefined_global (cu |> Compilation_unit.full_path_as_string))
+
   let eval_ident id =
-    try
-      if Ident.is_global_or_predef id
-      then global_symbol id
-      else toplevel_value id
+    try toplevel_value id
     with _ ->
       raise (Undefined_global (Ident.name id))
 
@@ -200,14 +207,14 @@ let execute_phrase print_outcome ppf phr =
         if Config.flambda then
           let { Lambda.module_ident; main_module_block_size = size;
                 required_globals; code = res } =
-            Translmod.transl_implementation_flambda phrase_name
+            Translmod.transl_implementation_flambda phrase_comp_unit
               (str, Tcoerce_none)
           in
           remember module_ident 0 sg';
           module_ident, close_phrase res, required_globals, size
         else
-          let size, res = Translmod.transl_store_phrases phrase_name str in
-          Ident.create_persistent phrase_name, res, Ident.Set.empty, size
+          let size, res = Translmod.transl_store_phrases phrase_comp_unit str in
+          phrase_comp_unit, res, Compilation_unit.Set.empty, size
       in
       Warnings.check_fatal ();
       begin try
@@ -221,7 +228,8 @@ let execute_phrase print_outcome ppf phr =
           | Result _ ->
               if Config.flambda then
                 (* CR-someday trefis: *)
-                Env.register_import_as_opaque (Ident.name module_ident)
+                Env.register_import_as_opaque
+                  (Compilation_unit.name module_ident)
               else
                 Compilenv.record_global_approx_toplevel ();
               if print_outcome then

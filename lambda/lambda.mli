@@ -74,8 +74,9 @@ type primitive =
   | Pbytes_of_string
   | Pignore
     (* Globals *)
-  | Pgetglobal of Ident.t
-  | Psetglobal of Ident.t
+  | Pgetglobal of Compilation_unit.t
+  | Psetglobal of Compilation_unit.t
+  | Pgetpredef of Ident.t
   (* Operations on heap blocks *)
   | Pmakeblock of int * mutable_flag * block_shape * alloc_mode
   | Pmakefloatblock of mutable_flag * alloc_mode
@@ -295,6 +296,11 @@ type check_attribute =
   | Assert of property
   | Assume of property
 
+type loop_attribute =
+  | Always_loop (* [@loop] or [@loop always] *)
+  | Never_loop (* [@loop never] *)
+  | Default_loop (* no [@loop] attribute *)
+
 type function_kind = Curried of {nlocal: int} | Tupled
 (* [nlocal] determines how many arguments may be partially applied
    before the resulting closure must be locally allocated.
@@ -323,6 +329,7 @@ type function_attribute = {
   local: local_attribute;
   check : check_attribute;
   poll: poll_attribute;
+  loop: loop_attribute;
   is_a_functor: bool;
   stub: bool;
   tmc_candidate: bool;
@@ -425,10 +432,11 @@ and lambda_event_kind =
   | Lev_module_definition of Ident.t
 
 type program =
-  { module_ident : Ident.t;
+  { module_ident : Compilation_unit.t;
     main_module_block_size : int;
-    required_globals : Ident.Set.t;    (* Modules whose initializer side effects
-                                          must occur before [code]. *)
+    required_globals : Compilation_unit.Set.t;
+                                        (* Modules whose initializer side effects
+                                           must occur before [code]. *)
     code : lambda }
 (* Lambda code for the middle-end.
    * In the closure case the code is a sequence of assignments to a

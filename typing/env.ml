@@ -181,7 +181,8 @@ let map_summary f = function
   | Env_module_unbound (s, u, r) -> Env_module_unbound (f s, u, r)
 
 type address =
-  | Aident of Ident.t
+  | Aunit of Compilation_unit.t
+  | Alocal of Ident.t
   | Adot of address * int
 
 module TycompTbl =
@@ -811,26 +812,38 @@ let md md_type =
 (* Print addresses *)
 
 let rec print_address ppf = function
-  | Aident id -> Format.fprintf ppf "%s" (Ident.name id)
+  | Aunit cu -> Format.fprintf ppf "%s" (Compilation_unit.full_path_as_string cu)
+  | Alocal id -> Format.fprintf ppf "%s" (Ident.name id)
   | Adot(a, pos) -> Format.fprintf ppf "%a.[%i]" print_address a pos
 
-(* The name of the compilation unit currently compiled.
-   "" if outside a compilation unit. *)
+type address_head =
+  | AHunit of Compilation_unit.t
+  | AHlocal of Ident.t
+
+let rec address_head = function
+  | Aunit cu -> AHunit cu
+  | Alocal id -> AHlocal id
+  | Adot (a, _) -> address_head a
+
+(* The name of the compilation unit currently compiled. *)
 module Current_unit_name : sig
-  val get : unit -> modname
-  val set : modname -> unit
-  val is : modname -> bool
+  val get : unit -> Compilation_unit.t option
+  val set : Compilation_unit.t option -> unit
+  val is : string -> bool
   val is_ident : Ident.t -> bool
   val is_path : Path.t -> bool
 end = struct
-  let current_unit =
-    ref ""
   let get () =
-    !current_unit
-  let set name =
-    current_unit := name
+    Compilation_unit.get_current ()
+  let set comp_unit =
+    Compilation_unit.set_current comp_unit
+  let get_name () =
+    Option.map Compilation_unit.name (get ())
   let is name =
-    !current_unit = name
+    let current_name_string =
+      Option.map Compilation_unit.Name.to_string (get_name ())
+    in
+    Option.equal String.equal current_name_string (Some name)
   let is_ident id =
     Ident.is_global id && is (Ident.name id)
   let is_path = function
@@ -904,7 +917,7 @@ let sign_of_cmi ~freshen { Persistent_env.Persistent_signature.cmi; _ } =
   let name = cmi.cmi_name in
   let sign = cmi.cmi_sign in
   let flags = cmi.cmi_flags in
-  let id = Ident.create_persistent name in
+  let id = Ident.create_persistent (Compilation_unit.name_as_string name) in
   let path = Pident id in
   let alerts =
     List.fold_left (fun acc -> function Alerts s -> s | _ -> acc)
@@ -915,14 +928,16 @@ let sign_of_cmi ~freshen { Persistent_env.Persistent_signature.cmi; _ } =
     { md_type =  Mty_signature sign;
       md_loc = Location.none;
       md_attributes = [];
-      md_uid = Uid.of_compilation_unit_id id;
+      md_uid = Uid.of_compilation_unit_id name;
     }
   in
-  let mda_address = Lazy_backtrack.create_forced (Aident id) in
+  let mda_address = Lazy_backtrack.create_forced (Aunit name) in
   let mda_declaration =
     Subst.(Lazy.module_decl Make_local identity (Lazy.of_module_decl md))
   in
-  let mda_shape = Shape.for_persistent_unit name in
+  let mda_shape =
+    Shape.for_persistent_unit (name |> Compilation_unit.full_path_as_string)
+  in
   let mda_components =
     let mty = Subst.Lazy.of_modtype (Mty_signature sign) in
     let mty =
@@ -985,7 +1000,7 @@ let reset_declaration_caches () =
   ()
 
 let reset_cache ~preserve_persistent_env =
-  Current_unit_name.set "";
+  Compilation_unit.set_current None;
   if not preserve_persistent_env then
     Persistent_env.clear !persistent_env;
   reset_declaration_caches ();
@@ -1043,13 +1058,15 @@ let check_functor_appl
       ~arg_path ~arg_mty ~param_mty
       env
 
+let modname_of_ident id = Ident.name id |> Compilation_unit.Name.of_string
+
 (* Lookup by identifier *)
 
 let find_ident_module id env =
   match find_same_module id env.modules with
   | Mod_local data -> data
   | Mod_unbound _ -> raise Not_found
-  | Mod_persistent -> find_pers_mod (Ident.name id)
+  | Mod_persistent -> find_pers_mod (id |> modname_of_ident)
 
 let rec find_module_components path env =
   match path with
@@ -1342,10 +1359,16 @@ let shape_or_leaf uid = function
 let required_globals = s_ref []
 let reset_required_globals () = required_globals := []
 let get_required_globals () = !required_globals
-let add_required_global id =
-  if Ident.is_global_or_predef id && not !Clflags.transparent_modules
-  && not (List.exists (Ident.same id) !required_globals)
+let add_required_unit id =
+  if not (List.exists (Compilation_unit.equal id) !required_globals)
   then required_globals := id :: !required_globals
+let add_required_global id env =
+  if not !Clflags.transparent_modules
+  then
+    let address = find_module_address id env in
+    match address_head address with
+    | AHlocal _ -> ()
+    | AHunit id -> add_required_unit id
 
 let rec normalize_module_path lax env = function
   | Pident id as path when lax && Ident.is_global id ->
@@ -1369,7 +1392,7 @@ and expand_module_path lax env path =
       if lax || !Clflags.transparent_modules then path' else
       let id = Path.head path in
       if Ident.is_global_or_predef id && not (Ident.same id (Path.head path'))
-      then add_required_global id;
+      then add_required_global (Pident id) env;
       path'
   | _ -> path
   with Not_found when lax
@@ -1516,7 +1539,7 @@ let rec scrape_alias_for_visit env mty =
       match path with
       | Pident id
         when Ident.is_global id
-          && not (Persistent_env.looked_up !persistent_env (Ident.name id)) ->
+          && not (Persistent_env.looked_up !persistent_env (id |> modname_of_ident)) ->
           false
       | path -> (* PR#6600: find_module may raise Not_found *)
           try
@@ -1556,7 +1579,7 @@ let iter_env wrap proj1 proj2 f env () =
        | Mod_local data ->
            iter_components (Pident id) path data.mda_components
        | Mod_persistent ->
-           let modname = Ident.name id in
+           let modname = modname_of_ident id in
            match Persistent_env.find_in_cache !persistent_env modname with
            | None -> ()
            | Some data ->
@@ -1579,8 +1602,8 @@ let same_types env1 env2 =
 
 let used_persistent () =
   Persistent_env.fold !persistent_env
-    (fun s _m r -> String.Set.add s r)
-    String.Set.empty
+    (fun s _m r -> Compilation_unit.Name.Set.add s r)
+    Compilation_unit.Name.Set.empty
 
 let find_all_comps wrap proj s (p, mda) =
   match get_components mda.mda_components with
@@ -1708,16 +1731,19 @@ let add_to_tbl id decl tbl =
   let decls = try NameMap.find id tbl with Not_found -> [] in
   NameMap.add id (decl :: decls) tbl
 
+let primitive_address_error =
+  Invalid_argument "Primitives don't have addresses"
+
 let value_declaration_address (_ : t) id decl =
   match decl.val_kind with
-  | Val_prim _ -> Lazy_backtrack.create_failed Not_found
-  | _ -> Lazy_backtrack.create_forced (Aident id)
+  | Val_prim _ -> Lazy_backtrack.create_failed primitive_address_error
+  | _ -> Lazy_backtrack.create_forced (Alocal id)
 
 let extension_declaration_address (_ : t) id (_ : extension_constructor) =
-  Lazy_backtrack.create_forced (Aident id)
+  Lazy_backtrack.create_forced (Alocal id)
 
 let class_declaration_address (_ : t) id (_ : class_declaration) =
-  Lazy_backtrack.create_forced (Aident id)
+  Lazy_backtrack.create_forced (Alocal id)
 
 let module_declaration_address env id presence md =
   match presence with
@@ -1728,7 +1754,7 @@ let module_declaration_address env id presence md =
       | _ -> assert false
     end
   | Mp_present ->
-      Lazy_backtrack.create_forced (Aident id)
+      Lazy_backtrack.create_forced (Alocal id)
 
 let is_identchar c =
   (* This should be kept in sync with the [identchar_latin1] character class
@@ -1770,7 +1796,7 @@ let rec components_of_module_maker
             let decl' = Subst.value_description sub decl in
             let addr =
               match decl.val_kind with
-              | Val_prim _ -> Lazy_backtrack.create_failed Not_found
+              | Val_prim _ -> Lazy_backtrack.create_failed primitive_address_error
               | _ -> next_address ()
             in
             let vda_shape = Shape.proj cm_shape (Shape.Item.value id) in
@@ -2569,7 +2595,7 @@ let open_signature
 
 (* Read a signature from a file *)
 let read_signature modname filename =
-  let mda = read_pers_mod modname filename in
+  let mda = read_pers_mod (Compilation_unit.name modname) filename in
   let md = Subst.Lazy.force_module_decl mda.mda_declaration in
   match md.md_type with
   | Mty_signature sg -> sg
@@ -2830,12 +2856,13 @@ let lookup_ident_module (type a) (load : a load) ~errors ~use ~loc s env =
   | Mod_unbound reason ->
       report_module_unbound ~errors ~loc env reason
   | Mod_persistent -> begin
+      let name = s |> Compilation_unit.Name.of_string in
       match load with
       | Don't_load ->
-          check_pers_mod ~loc s;
+          check_pers_mod ~loc name;
           path, (() : a)
       | Load -> begin
-          match find_pers_mod s with
+          match find_pers_mod name with
           | mda ->
               use_module ~use ~loc path mda;
               path, (mda : a)
@@ -3341,7 +3368,7 @@ let bound_module name env =
   | exception Not_found ->
       if Current_unit_name.is name then false
       else begin
-        match find_pers_mod name with
+        match find_pers_mod (name |> Compilation_unit.Name.of_string) with
         | _ -> true
         | exception Not_found -> false
       end
@@ -3424,7 +3451,8 @@ let fold_modules f lid env acc =
                in
                f name p md acc
            | Mod_persistent ->
-               match Persistent_env.find_in_cache !persistent_env name with
+               let modname = name |> Compilation_unit.Name.of_string in
+               match Persistent_env.find_in_cache !persistent_env modname with
                | None -> acc
                | Some mda ->
                    let md =
@@ -3488,7 +3516,8 @@ let filter_non_loaded_persistent f env =
          | Mod_local _ -> acc
          | Mod_unbound _ -> acc
          | Mod_persistent ->
-             match Persistent_env.find_in_cache !persistent_env name with
+             let modname = name |> Compilation_unit.Name.of_string in
+             match Persistent_env.find_in_cache !persistent_env modname with
              | Some _ -> acc
              | None ->
                  if f (Ident.create_persistent name) then
