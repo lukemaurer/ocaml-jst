@@ -25,7 +25,8 @@
    ;; CR gyorsh: it is not clear what the ":standard" flags are, and they
    ;; may change depending on the version of dune.
    ;; Consider hard-coded flags, such as -O3.
-   (:standard -alloc-check)))
+   (:standard ;-alloc-check CR lmaurer: Turning this off for testing
+ )))
  (boot
   (flags
    (:standard -warn-error +A))))

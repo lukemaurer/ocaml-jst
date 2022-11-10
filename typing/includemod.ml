@@ -957,14 +957,29 @@ let () =
 (* Check that an implementation of a compilation unit meets its
    interface. *)
 
+let compilation_unit_types ~in_eq ~loc env ~mark subst uty1 uty2 shape =
+  let mty1 = uty1 |> Types.module_type_of_compilation_unit in
+  let mty2 = uty2 |> Types.module_type_of_compilation_unit in
+  modtypes ~in_eq ~loc env ~mark subst mty1 mty2 shape
+
 let compunit env ~mark impl_name impl_sig intf_name intf_sig unit_shape =
   match
-    signatures ~in_eq:false ~loc:(Location.in_file impl_name) env ~mark
-      Subst.identity impl_sig intf_sig unit_shape
+    compilation_unit_types ~in_eq:false ~loc:(Location.in_file impl_name) env
+      ~mark Subst.identity impl_sig intf_sig unit_shape
   with Result.Error reasons ->
+    (* CR lmaurer: TODO Probably need to define [implementation_desc_symptoms]
+       and deal explicitly with functor parameters *)
+    ignore (intf_name, reasons : _);
+    assert false
+    (* 4.14:
     let cdiff =
       Error.In_Compilation_unit(Error.diff impl_name intf_name reasons) in
     raise(Error(env, cdiff))
+    *)
+    (* Original patch (same as 4.12):
+    raise(Error(([], Env.empty,Interface_mismatch(impl_name, intf_name))
+                :: reasons))
+    *)
   | Ok x -> x
 
 (* Functor diffing computation:
@@ -1219,6 +1234,14 @@ let type_declarations ~loc env ~mark id decl1 decl2 =
   | Error (Error.Core reason) ->
       raise (Error(env,Error.(In_Type_declaration(id,reason))))
   | Error _ -> assert false
+
+let compunits ~loc env ~mark uty1 uty2 =
+  match compilation_unit_types ~in_eq:false ~loc env ~mark Subst.identity uty1 uty2 Shape.dummy_mod with
+  | Ok (cu, _) -> cu
+  | Error reason ->
+      (* CR lmaurer: TODO *)
+      ignore (reason : _);
+      assert false
 
 let strengthened_module_decl ~loc ~aliasable env ~mark md1 path1 md2 =
   match strengthened_module_decl ~loc ~aliasable env ~mark Subst.identity

@@ -177,7 +177,8 @@ let execute_phrase print_outcome ppf phr =
       let (str, sg, names, shape, newenv) =
         Typemod.type_toplevel_phrase oldenv oldsig sstr
       in
-      if !Clflags.dump_typedtree then Printtyped.implementation ppf str;
+      if !Clflags.dump_typedtree then
+        Printtyped.implementation_desc ppf (Timpl_structure str);
       let sg' = Typemod.Signature_names.simplify newenv names sg in
       ignore (Includemod.signatures oldenv ~mark:Mark_positive sg sg');
       Typecore.force_delayed_checks ();
@@ -205,10 +206,17 @@ let execute_phrase print_outcome ppf phr =
       in
       let module_ident, res, required_globals, size =
         if Config.flambda then
+          let impl =
+            { Typedtree.structure = Timpl_structure str;
+              signature = Unit_signature sg';
+              coercion = Tcoerce_none;
+              shape;
+              env = oldenv; (* ? *)
+            }
+          in
           let { Lambda.module_ident; main_module_block_size = size;
                 required_globals; code = res } =
-            Translmod.transl_implementation_flambda phrase_comp_unit
-              (str, Tcoerce_none)
+            Translmod.transl_implementation_flambda phrase_comp_unit impl
           in
           remember module_ident 0 sg';
           module_ident, close_phrase res, required_globals, size

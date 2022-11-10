@@ -26,7 +26,8 @@ type import_info =
 
 type cmi_infos = {
     cmi_name : Compilation_unit.t;
-    cmi_sign : Types.signature_item list;
+    cmi_sign : Types.compilation_unit;
+    cmi_param_of : Compilation_unit.t option;
     cmi_crcs : import_info list;
     cmi_flags : pers_flags list;
 }

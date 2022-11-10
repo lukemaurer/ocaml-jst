@@ -159,6 +159,10 @@ val strengthened_module_decl:
   loc:Location.t -> aliasable:bool -> Env.t -> mark:mark ->
   module_declaration -> Path.t -> module_declaration -> module_coercion
 
+val compunits:
+  loc:Location.t -> Env.t -> mark:mark ->
+  compilation_unit -> compilation_unit -> module_coercion
+
 val check_modtype_inclusion :
   loc:Location.t -> Env.t -> Types.module_type -> Path.t -> Types.module_type ->
   explanation option
@@ -176,8 +180,8 @@ val include_functor_signatures : Env.t -> mark:mark ->
   signature -> signature -> (Ident.t * module_coercion) list
 
 val compunit:
-      Env.t -> mark:mark -> string -> signature ->
-      string -> signature -> Shape.t -> module_coercion * Shape.t
+      Env.t -> mark:mark -> string -> compilation_unit ->
+      string -> compilation_unit -> Shape.t -> module_coercion * Shape.t
 
 val type_declarations:
   loc:Location.t -> Env.t -> mark:mark ->
